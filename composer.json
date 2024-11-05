@@ -20,10 +20,6 @@
         }
     ],
     "require-dev": {
-        "codeception/codeception": "^5",
-        "codeception/module-asserts": "^3",
-        "phpunit/phpunit": "^9",
-        "codeception/module-phpbrowser": "^3",
         "johnpbloch/wordpress-core": "^6.2"
     },
     "scripts": {
