@@ -23,7 +23,7 @@ require_once __DIR__ . '/inc/class-generator-3_1_0.php';
 require_once __DIR__ . '/inc/class-generator-cli.php';
 
 function OpenApiGenerator() {
-    return \OpenAPIGenerator\Integration::instance();
+    return \BrianHenryIE\OpenAPIGenerator\Integration::instance();
 }
 
 $GLOBALS['document_generator_for_openapi_integration'] = OpenApiGenerator();

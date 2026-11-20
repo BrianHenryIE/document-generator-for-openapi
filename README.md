@@ -15,7 +15,20 @@ There is also a built in WP-CLI Command.
 1. Install plugin via WordPress Plugin repository or by manually copying files
 2. Activate the plugin
 3. Access the REST Api of the generator by calling ``/wp-json/document-generator-for-openapi/v1/document?namespace=\<NAMESPACE\>`` and your OpenAPI document will be returned.
-4. Or use the integrated WP-CLI command ``wp openapi-generator export-file`` 
+4. Or use the integrated WP-CLI command ``wp openapi-generator export-file``
+
+## Build
+
+[wp-cli/dist-archive-command](https://github.com/wp-cli/dist-archive-command/) is used to create a plugin archive to install:
+
+```
+$ composer install
+Installing dependencies from lock file (including require-dev)
+...
+
+$ wp dist-archive . .
+Success: Created document-generator-for-openapi.1.1.0.zip
+```
 
 ## Limitations and known issues
 

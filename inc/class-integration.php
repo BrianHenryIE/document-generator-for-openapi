@@ -1,6 +1,6 @@
 <?php
 
-namespace OpenAPIGenerator;
+namespace BrianHenryIE\OpenAPIGenerator;
 
 class Integration {
 

@@ -1,0 +1,14 @@
+.distignore
+.env.template
+.git
+.gitignore
+.idea
+README.md
+codeception.yml
+composer.json
+composer.lock
+dev-ops
+docker-compose.yml
+/vendor
+*.zip
+.DS_Store

@@ -1,6 +1,6 @@
 <?php 
 
-namespace OpenAPIGenerator;
+namespace BrianHenryIE\OpenAPIGenerator;
 
 require_once __DIR__ . '/cli/class-document-generator-command.php';
 
@@ -24,12 +24,12 @@ class GeneratorCLI {
 	
 	function add_commands()
 	{
-		\WP_CLI::add_command('openapi-generator', \OpenAPIGenerator\cli\DocumentGenerator_Command::class);
+		\WP_CLI::add_command('openapi-generator', \BrianHenryIE\OpenAPIGenerator\cli\DocumentGenerator_Command::class);
 	}
 }
 
 if (class_exists('WP_CLI')) {
-	$OpenAPIGenerator_Cli = \OpenAPIGenerator\GeneratorCLI::get_instance();
+	$OpenAPIGenerator_Cli = \BrianHenryIE\OpenAPIGenerator\GeneratorCLI::get_instance();
 }
 
 ?>

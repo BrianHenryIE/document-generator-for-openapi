@@ -1,6 +1,6 @@
 <?php
 
-namespace OpenAPIGenerator\cli;
+namespace BrianHenryIE\OpenAPIGenerator\cli;
 
 use WP_CLI\Utils;
 
@@ -51,7 +51,7 @@ class DocumentGenerator_Command
 
 		//generate openapi document
 		//TODO create factory for switching between version
-		$generator = new \OpenAPIGenerator\Generator3_1_0($namespace, $data, $extract_common_types);
+		$generator = new \BrianHenryIE\OpenAPIGenerator\Generator3_1_0($namespace, $data, $extract_common_types);
 		$result = $generator->generateDocument();
 
 		//write json to file
