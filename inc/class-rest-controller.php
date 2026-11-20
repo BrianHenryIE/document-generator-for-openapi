@@ -61,9 +61,7 @@ class RestController {
         }
 
         //get wordpress rest schema
-        $routes = rest_get_server()->get_routes( $request['namespace'] );
-        
-        $data = rest_get_server()->get_data_for_routes( $routes, 'help' );
+        $data = RouteData::forNamespace( $namespace );
 
         //generate openapi document
         //TODO create factory for switching between version

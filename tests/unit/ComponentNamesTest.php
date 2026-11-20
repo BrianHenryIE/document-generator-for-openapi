@@ -222,7 +222,7 @@ class ComponentNamesTest extends TestCase {
 	public function test_a_title_extracts_a_schema_which_is_neither_an_object_nor_an_enum(): void {
 		$document = $this->generate( $this->routes( $this->activation() ) );
 
-		$this->assertSame( [ 'type' => 'string' ], $document['components']['schemas']['LicenseKey'] );
+		$this->assertSame( [ 'type' => 'string', 'title' => 'LicenseKey' ], $document['components']['schemas']['LicenseKey'] );
 		$body = $document['paths']['/license/activate']['post']['requestBody']['content']['application/json']['schema'];
 		$this->assertSame( [ '$ref' => '#/components/schemas/LicenseKey' ], $body['properties']['license'] );
 	}

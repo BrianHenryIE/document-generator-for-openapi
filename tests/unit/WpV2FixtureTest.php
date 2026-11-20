@@ -17,6 +17,7 @@ class WpV2FixtureTest extends TestCase {
 
 		$generator = new Generator3_1_0( 'wp/v2', $input['routes'], false );
 
-		$this->assertEquals( $expected, $generator->generateDocument() );
+		// Compared as the JSON it becomes: the empty default of an object is an object there, not an empty list.
+		$this->assertEquals( $expected, json_decode( (string) json_encode( $generator->generateDocument() ), true ) );
 	}
 }

@@ -163,6 +163,7 @@ class Generator3_1_0 extends GeneratorBase {
         foreach ( $spec['endpoints'] as $endpoint ) {
             $parameters = [];
             $contentProperties = [];
+            $contentRequired = [];
             $substitutionParameters = [];
 
             //the arguments of an endpoint belong to its path and methods, which no other endpoint has
@@ -186,6 +187,10 @@ class Generator3_1_0 extends GeneratorBase {
                 //if this is not a path parameter, add it to the content schema
                 if ( !array_key_exists( $argumentName, $substitutions ) ) {
                     $contentProperties[ $argumentName ] = $this->generateSchemaObject( $argument, $argumentContext );
+
+                    if ( isset( $argument['required'] ) && $argument['required'] === true ) {
+                        $contentRequired[] = (string) $argumentName;
+                    }
                 } else {
                     $substitutionParameters[] = $paramSchema;
                 }
@@ -235,6 +240,11 @@ class Generator3_1_0 extends GeneratorBase {
                                 ]
                             ]
                         ];
+
+                        //the arguments WordPress requires are the required properties of the body
+                        if ( count( $contentRequired ) ) {
+                            $method['requestBody']['content']['application/json']['schema']['required'] = $contentRequired;
+                        }
                     }
   
                     if ( count( $substitutionParameters ) ) {               
@@ -324,7 +334,7 @@ class Generator3_1_0 extends GeneratorBase {
      * @throws ComponentNameCollisionException
      */
     protected function addComponent( $name, $schema, $location ) {
-        if ( isset( $this->components['schemas'][$name] ) && $this->components['schemas'][$name] !== $schema ) {
+        if ( isset( $this->components['schemas'][$name] ) && !$this->isSameSchema( $this->components['schemas'][$name], $schema ) ) {
             throw new ComponentNameCollisionException(
                 $name,
                 isset( $this->componentLocations[$name] ) ? $this->componentLocations[$name] : 'the generator\'s own components',
@@ -338,6 +348,44 @@ class Generator3_1_0 extends GeneratorBase {
             $this->componentLocations[$name] = $location;
         }
     }
+
+    /**
+     * Whether two generated schemas are the same. Compared as the JSON they become, because an empty object,
+     * e.g. the `default` of an object, is a `stdClass`, and two of those are never identical.
+     */
+    protected function isSameSchema( $first, $second ) {
+        return json_encode( $first ) === json_encode( $second );
+    }
+
+    /**
+     * The JSON Schema keywords copied as they are. With `type`, `enum`, `properties`, `items`, `required`,
+     * `additionalProperties`, `patternProperties`, `oneOf` and `anyOf`, which are converted, these are the
+     * keywords WordPress validates, and the annotations a route can add.
+     *
+     * @see rest_get_allowed_schema_keywords()
+     */
+    const COPIED_KEYWORDS = [
+        'title',
+        'description',
+        'format',
+        'pattern',
+        'minLength',
+        'maxLength',
+        'minimum',
+        'maximum',
+        'exclusiveMinimum',
+        'exclusiveMaximum',
+        'multipleOf',
+        'minItems',
+        'maxItems',
+        'uniqueItems',
+        'minProperties',
+        'maxProperties',
+        'examples',
+        'deprecated',
+        'readOnly',
+        'writeOnly',
+    ];
 
     /**
      * @param array $schemaObject The WordPress REST schema.
@@ -397,71 +445,143 @@ class Generator3_1_0 extends GeneratorBase {
         //the schemas inside this one
         $childContext = array_merge( $context, [ 'isResponse' => false ] );
 
+        $result = [];
+
+        $types = isset( $schemaObject['type'] ) ? (array) $schemaObject['type'] : [];
+        $hasOneOf = isset( $schemaObject['oneOf'] ) && is_array( $schemaObject['oneOf'] );
+        $hasAnyOf = isset( $schemaObject['anyOf'] ) && is_array( $schemaObject['anyOf'] );
+
+        //without a `type`, e.g. an alternative of `oneOf` whose parent has it, `properties` and `items` still apply
+        $hasProperties = isset( $schemaObject['properties'] ) && is_array( $schemaObject['properties'] ) &&
+                            ( in_array( 'object', $types, true ) || empty( $types ) );
+        $hasItems = isset( $schemaObject['items'] ) && is_array( $schemaObject['items'] ) &&
+                            ( in_array( 'array', $types, true ) || empty( $types ) );
+
         if ( isset( $schemaObject['type'] ) ) {
-            if ( is_array( $schemaObject['type'] ) &&
-                isset( $schemaObject['oneOf'] ) && 
-                is_array( $schemaObject['oneOf'] ) ) {
+            //a list of types with `oneOf` is written as the `oneOf` alone, which says the same
+            if ( !( is_array( $schemaObject['type'] ) && $hasOneOf ) ) {
+                $result['type'] = $schemaObject['type'];
+            }
+        } elseif ( !$hasOneOf && !$hasAnyOf && !$hasProperties && !$hasItems ) {
+            //a schema which says nothing of what it holds is taken as a string
+            $result['type'] = 'string';
+        }
 
-                $result['oneOf'] = [];
+        foreach ( [ 'oneOf', 'anyOf' ] as $combination ) {
+            if ( !isset( $schemaObject[$combination] ) || !is_array( $schemaObject[$combination] ) ) {
+                continue;
+            }
 
-                foreach( $schemaObject['oneOf'] as $index => $type ) {
-                    $result['oneOf'][] = $this->generateSchemaObject( $type,
+            $result[$combination] = [];
+
+            foreach ( array_values( $schemaObject[$combination] ) as $index => $type ) {
+                $result[$combination][] = $this->generateSchemaObject( $type,
                                             array_merge( $childContext, [
                                                 'currentKey' => null,
                                                 'name' => $name === null ? null : $name . '.option' . ( $index + 1 ),
-                                                'location' => $location . '/oneOf/' . $index
+                                                'location' => $location . '/' . $combination . '/' . $index
                                             ] ) );
-                }
-
-            } else {
-                $result['type'] = $schemaObject['type'];
-
-                if ( $schemaObject['type'] === 'object' && isset( $schemaObject['properties'] ) ) {
-                    $requiredProperties = [];
-
-                    foreach( $schemaObject['properties'] as $key => $parameter) {
-                        $result['properties'][$key] = $this->generateSchemaObject( $parameter,
-                                                        array_merge( $childContext, [
-                                                            'currentKey' => $key,
-                                                            'name' => $name === null ? $key : $name . '.' . $key,
-                                                            'location' => $location . '/' . $key
-                                                        ] ) );
-
-                        if ( isset( $schemaObject['properties'][$key]['required'] ) &&
-                            $schemaObject['properties'][$key]['required'] === true) {
-                            $requiredProperties[] = $key;
-                        }
-                    }
-
-                    if ( !empty($requiredProperties) ) {
-                        $result['required'] = $requiredProperties;
-                    }
-                }
-
-                if ( $schemaObject['type'] === 'array' && isset( $schemaObject['items'] ) ) {
-                    //TODO Is it safe to always pass context with same currentKey of parent?
-                    $result['items'] = $this->generateSchemaObject( $schemaObject['items'],
-                                            array_merge( $childContext, [
-                                                'name' => $name,
-                                                'location' => $location . '/items'
-                                            ] ) );
-                }
-
             }
-        } else {
-            $result = ['type' => 'string'];
         }
 
-        if ( isset( $schemaObject['format'] ) ) {
-            $result['format'] = $schemaObject['format'];
+        //WordPress marks a property as required on the property, JSON Schema since draft 4 lists them on the object
+        $requiredProperties = [];
+
+        if ( $hasProperties ) {
+
+            foreach( $schemaObject['properties'] as $key => $parameter) {
+                $result['properties'][$key] = $this->generateSchemaObject( $parameter,
+                                                array_merge( $childContext, [
+                                                    'currentKey' => $key,
+                                                    'name' => $name === null ? $key : $name . '.' . $key,
+                                                    'location' => $location . '/' . $key
+                                                ] ) );
+
+                if ( isset( $parameter['required'] ) && $parameter['required'] === true ) {
+                    $requiredProperties[] = (string) $key;
+                }
+            }
         }
 
-        if ( isset( $schemaObject['description'] ) ) {
-            $result['description'] = $schemaObject['description'];
+        if ( isset( $schemaObject['required'] ) && is_array( $schemaObject['required'] ) ) {
+            $requiredProperties = array_merge( $requiredProperties, array_map( 'strval', $schemaObject['required'] ) );
         }
 
-        if ( isset( $schemaObject['enum'] ) ) {
+        if ( !empty( $requiredProperties ) ) {
+            $result['required'] = array_values( array_unique( $requiredProperties ) );
+        }
+
+        if ( isset( $schemaObject['patternProperties'] ) && is_array( $schemaObject['patternProperties'] ) ) {
+            $index = 0;
+
+            foreach ( $schemaObject['patternProperties'] as $pattern => $parameter ) {
+                $index++;
+                $result['patternProperties'][$pattern] = $this->generateSchemaObject( $parameter,
+                                                            array_merge( $childContext, [
+                                                                'currentKey' => null,
+                                                                'name' => $name === null ? null : $name . '.pattern' . $index,
+                                                                'location' => $location . '/patternProperties/' . $pattern
+                                                            ] ) );
+            }
+        }
+
+        if ( isset( $schemaObject['additionalProperties'] ) ) {
+            $result['additionalProperties'] = is_array( $schemaObject['additionalProperties'] )
+                ? $this->generateSchemaObject( $schemaObject['additionalProperties'],
+                    array_merge( $childContext, [
+                        'currentKey' => null,
+                        'name' => $name === null ? null : $name . '.additionalProperties',
+                        'location' => $location . '/additionalProperties'
+                    ] ) )
+                : (bool) $schemaObject['additionalProperties'];
+        }
+
+        if ( $hasItems ) {
+            //TODO Is it safe to always pass context with same currentKey of parent?
+            $result['items'] = $this->generateSchemaObject( $schemaObject['items'],
+                                    array_merge( $childContext, [
+                                        'name' => $name,
+                                        'location' => $location . '/items'
+                                    ] ) );
+        }
+
+        foreach ( self::COPIED_KEYWORDS as $keyword ) {
+            if ( isset( $schemaObject[$keyword] ) ) {
+                $result[$keyword] = $schemaObject[$keyword];
+            }
+        }
+
+        //WordPress validates as JSON Schema draft 4, where `exclusiveMinimum` is a boolean which makes
+        //`minimum` exclusive. OpenAPI 3.1's schemas are draft 2020-12, where it is the limit itself.
+        foreach ( [ 'exclusiveMinimum' => 'minimum', 'exclusiveMaximum' => 'maximum' ] as $exclusive => $inclusive ) {
+            if ( !isset( $result[$exclusive] ) || !is_bool( $result[$exclusive] ) ) {
+                continue;
+            }
+
+            if ( $result[$exclusive] && isset( $result[$inclusive] ) ) {
+                $result[$exclusive] = $result[$inclusive];
+                unset( $result[$inclusive] );
+            } else {
+                unset( $result[$exclusive] );
+            }
+        }
+
+        //WordPress spells it in lowercase
+        if ( isset( $schemaObject['readonly'] ) && $schemaObject['readonly'] === true ) {
+            $result['readOnly'] = true;
+        }
+
+        if ( isset( $schemaObject['enum'] ) && is_array( $schemaObject['enum'] ) ) {
             $result['enum'] = array_values( $schemaObject['enum'] );
+        }
+
+        //WordPress writes `'default' => null` for "no default", which is only a default where null is a value
+        if ( isset( $schemaObject['default'] ) ||
+            ( array_key_exists( 'default', $schemaObject ) && in_array( 'null', $types, true ) ) ) {
+            //PHP's empty array is JSON's empty list, which is not the default of an object
+            $result['default'] = $schemaObject['default'] === [] && in_array( 'object', $types, true )
+                ? new \stdClass()
+                : $schemaObject['default'];
         }
 
         //a route's response is made a component by generateResponseSchema()

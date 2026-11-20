@@ -17,6 +17,29 @@ There is also a built in WP-CLI Command.
 3. Access the REST Api of the generator by calling ``/wp-json/document-generator-for-openapi/v1/document?namespace=\<NAMESPACE\>`` and your OpenAPI document will be returned.
 4. Or use the integrated WP-CLI command ``wp openapi-generator export-file``
 
+## Schema keywords
+
+Every JSON Schema keyword WordPress validates is written to the document, for arguments and for responses:
+`type` (also a list, e.g. `["string", "null"]`), `format`, `enum`, `pattern`, `minLength`, `maxLength`, `minimum`,
+`maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `items`, `minItems`, `maxItems`, `uniqueItems`,
+`properties`, `additionalProperties`, `patternProperties`, `minProperties`, `maxProperties`, `oneOf`, `anyOf`,
+`title`, `description` and `default`. So are the annotations `examples` and `deprecated`.
+
+Some are converted to what OpenAPI 3.1 reads, which is JSON Schema draft 2020-12:
+
+- `'required' => true` on a property is listed in the `required` of its object, and a required argument in the
+  `required` of the request body.
+- `'readonly' => true` is `readOnly`.
+- Draft 4's `'minimum' => 0, 'exclusiveMinimum' => true` is `exclusiveMinimum: 0`, and the same for the maximum.
+- The empty `default` of an object is `{}`, not `[]`.
+- `'default' => null` is left out unless `null` is one of the types: WordPress uses it for "no default".
+
+What only WordPress understands (`context`, `arg_options`, `sanitize_callback`, `validate_callback`) is left out.
+
+WordPress describes a route's arguments with only the keywords it validates, so the `examples` and `deprecated`
+of an argument are read from the route as registered. `BrianHenryIE\OpenAPIGenerator\RouteData::forNamespace()`
+returns the routes with them put back, and is what the REST route and the WP-CLI command give the generator.
+
 ## Extracting common types
 
 With `--extract-common-types` (`extract_common_types=true` over REST), objects and enums are moved to

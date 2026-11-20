@@ -50,8 +50,7 @@ class DocumentGenerator_Command
 	private function do_export_file($namespace, $extract_common_types, $output, $strict_component_names = false)
 	{
 		//get wordpress rest schema
-		$routes = rest_get_server()->get_routes($namespace);
-		$data = rest_get_server()->get_data_for_routes($routes, 'help');
+		$data = \BrianHenryIE\OpenAPIGenerator\RouteData::forNamespace($namespace);
 
 		//generate openapi document
 		//TODO create factory for switching between version
