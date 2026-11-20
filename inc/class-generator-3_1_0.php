@@ -6,12 +6,28 @@ class Generator3_1_0 extends GeneratorBase {
 
     protected $components;
 
+    /**
+     * Where each extracted component was first found, to say so when another schema takes the same name.
+     *
+     * @var array<string, string> Component name to location.
+     */
+    protected $componentLocations = [];
+
     public $extractCommonTypes = false;    
 
-    public function __construct( $namespace, $routes, $extractCommonTypes ) {
+    /**
+     * Whether two different schemas with the same `title` are an error. Otherwise the second is named after
+     * where it is, as a schema without a title is.
+     *
+     * @var bool
+     */
+    public $strictComponentNames = false;
+
+    public function __construct( $namespace, $routes, $extractCommonTypes, $strictComponentNames = false ) {
         parent::__construct($namespace, $routes);
 
         $this->extractCommonTypes = $extractCommonTypes;
+        $this->strictComponentNames = $strictComponentNames;
 
         $this->components = [
             'schemas' => [
@@ -116,7 +132,7 @@ class Generator3_1_0 extends GeneratorBase {
                 $name = $spec['schema']['title'];
             }
 
-            $result[ $url ] = $this->generatePathItem( $name, $spec, $substitutions );
+            $result[ $url ] = $this->generatePathItem( $name, $spec, $substitutions, $url );
         }
 
         return $result;
@@ -140,7 +156,7 @@ class Generator3_1_0 extends GeneratorBase {
         return $substitutions;
     }
 
-    public function generatePathItem( $name, $spec, $substitutions ) {
+    public function generatePathItem( $name, $spec, $substitutions, $url = '' ) {
         
         $result = [];
 
@@ -149,18 +165,27 @@ class Generator3_1_0 extends GeneratorBase {
             $contentProperties = [];
             $substitutionParameters = [];
 
+            //the arguments of an endpoint belong to its path and methods, which no other endpoint has
+            $methods = implode( '-', $endpoint['methods'] );
+            $argumentsName = $this->getPathName( $url ) . '.' . $methods;
+            $argumentsLocation = trim( $methods . ' ' . $url );
+
             //create parameters for all the following methods of this endpoint
             //this means, yes, currently those parameters are duplicated in the OpenAPI document
             //because we don't use refs yet. 
             foreach ( $endpoint['args'] as $argumentName => $argument ) {
-                $paramSchema = $this->generateParameterObject( $argumentName, $argument, $substitutions );
+                $argumentContext = [
+                    'currentKey' => $argumentName,
+                    'name' => $argumentsName . '.' . $argumentName,
+                    'location' => $argumentsLocation . ' argument ' . $argumentName
+                ];
+
+                $paramSchema = $this->generateParameterObject( $argumentName, $argument, $substitutions, $argumentContext );
                 $parameters[] = $paramSchema;
 
                 //if this is not a path parameter, add it to the content schema
                 if ( !array_key_exists( $argumentName, $substitutions ) ) {
-                    $contentProperties[ $argumentName ] = $this->generateSchemaObject( $argument, [
-                        'currentKey' => $argumentName   
-                    ] );
+                    $contentProperties[ $argumentName ] = $this->generateSchemaObject( $argument, $argumentContext );
                 } else {
                     $substitutionParameters[] = $paramSchema;
                 }
@@ -233,7 +258,7 @@ class Generator3_1_0 extends GeneratorBase {
         return $result;
     }
 
-    public function generateParameterObject( $argumentName, $argument, $substitutions ) {
+    public function generateParameterObject( $argumentName, $argument, $substitutions, $context = null ) {
         $in = array_key_exists( $argumentName, $substitutions ) ? 'path' : 'query';
         
         $result = [
@@ -241,7 +266,7 @@ class Generator3_1_0 extends GeneratorBase {
             'in' => $in,
             'description' => isset( $argument['description'] ) ? $argument['description'] : '',
             'required' => $in === 'path' ? true : (isset ( $argument['required'] ) ? $argument['required'] : false ),
-            'schema' => $this->generateSchemaObject( $argument, [ 'currentKey' => $argumentName ] )
+            'schema' => $this->generateSchemaObject( $argument, $context ? $context : [ 'currentKey' => $argumentName ] )
         ];
 
         return $result;
@@ -252,9 +277,18 @@ class Generator3_1_0 extends GeneratorBase {
         $schemaName = $schema['title'];
 
         //add schema to the current schema pool to add it to the components part of the document later on.
-        $this->components['schemas'][$schemaName] = $this->generateSchemaObject( $schema, [
-            'currentKey' => null
+        $generated = $this->generateSchemaObject( $schema, [
+            'currentKey' => null,
+            'name' => $this->getComponentName( $schemaName ),
+            'location' => 'the response schema "' . $schemaName . '"',
+            'isResponse' => true
         ]);
+
+        if ( $this->extractCommonTypes && $this->strictComponentNames ) {
+            $this->addComponent( $schemaName, $generated, 'the response schema "' . $schemaName . '"' );
+        } else {
+            $this->components['schemas'][$schemaName] = $generated;
+        }
 
         return [
             'application/json' => [
@@ -265,7 +299,103 @@ class Generator3_1_0 extends GeneratorBase {
         ];
     }
 
+    /**
+     * The name of a path for the components of its arguments: `/posts/{id}/revisions` is `posts.id.revisions`.
+     */
+    public function getPathName( $url ) {
+        $name = $this->getComponentName( str_replace( [ '{', '}', '/' ], [ '', '', '.' ], trim( $url, '/' ) ) );
+
+        return $name === '' ? 'root' : $name;
+    }
+
+    /**
+     * Make a string a valid key of `components.schemas`, which allows `A-Z a-z 0-9 . _ -`.
+     */
+    public function getComponentName( $name ) {
+        return trim( preg_replace( '/[^A-Za-z0-9._-]+/', '-', (string) $name ), '-.' );
+    }
+
+    /**
+     * Add an extracted schema to `components.schemas`.
+     *
+     * The same schema found again is the same component. A different schema under a name already taken is an
+     * error: renaming it `name_1` would hide that two things share a name.
+     *
+     * @throws ComponentNameCollisionException
+     */
+    protected function addComponent( $name, $schema, $location ) {
+        if ( isset( $this->components['schemas'][$name] ) && $this->components['schemas'][$name] !== $schema ) {
+            throw new ComponentNameCollisionException(
+                $name,
+                isset( $this->componentLocations[$name] ) ? $this->componentLocations[$name] : 'the generator\'s own components',
+                $location
+            );
+        }
+
+        $this->components['schemas'][$name] = $schema;
+
+        if ( !isset( $this->componentLocations[$name] ) ) {
+            $this->componentLocations[$name] = $location;
+        }
+    }
+
+    /**
+     * @param array $schemaObject The WordPress REST schema.
+     * @param array $context {
+     *     @type string|null $currentKey The property or argument the schema is the value of.
+     *     @type string      $name       Optional. The name the schema has as a component when it has no `title`:
+     *                                   its parent's name and its key.
+     *     @type string      $location   Optional. Where the schema is, for error messages.
+     *     @type bool        $isResponse Optional. The schema is a route's response, which is always a component.
+     * }
+     */
     public function generateSchemaObject( $schemaObject, $context ) {
+
+        $hasTitle = $this->extractCommonTypes &&
+                    isset( $schemaObject['title'] ) && is_string( $schemaObject['title'] ) &&
+                    $this->getComponentName( $schemaObject['title'] ) !== '';
+
+        if ( !$hasTitle || $this->strictComponentNames ) {
+            return $this->generateNamedSchemaObject( $schemaObject, $context, $hasTitle );
+        }
+
+        //WordPress itself gives one title to different schemas, e.g. "Term ID Taxonomy Query" in wp/v2.
+        //Unless that is to be an error, a schema whose title is taken is named after where it is instead.
+        $components = $this->components;
+        $componentLocations = $this->componentLocations;
+
+        try {
+            return $this->generateNamedSchemaObject( $schemaObject, $context, true );
+        } catch ( ComponentNameCollisionException $exception ) {
+            $this->components = $components;
+            $this->componentLocations = $componentLocations;
+
+            return $this->generateNamedSchemaObject( $schemaObject, $context, false );
+        }
+    }
+
+    /**
+     * @param array $schemaObject The WordPress REST schema.
+     * @param array $context      See generateSchemaObject().
+     * @param bool  $useTitle     Whether the schema's `title` names its component.
+     *
+     * @throws ComponentNameCollisionException
+     */
+    protected function generateNamedSchemaObject( $schemaObject, $context, $useTitle ) {
+
+        $currentKey = isset( $context['currentKey'] ) ? $context['currentKey'] : null;
+        $location = isset( $context['location'] ) ? $context['location'] : (string) $currentKey;
+
+        //a title names the component, otherwise it is the parent's name and the key
+        $title = $useTitle ? $this->getComponentName( $schemaObject['title'] ) : null;
+
+        $name = isset( $context['name'] ) ? $context['name'] : $currentKey;
+        if ( $title !== null ) {
+            $name = $title;
+        }
+
+        //the schemas inside this one
+        $childContext = array_merge( $context, [ 'isResponse' => false ] );
 
         if ( isset( $schemaObject['type'] ) ) {
             if ( is_array( $schemaObject['type'] ) &&
@@ -274,9 +404,13 @@ class Generator3_1_0 extends GeneratorBase {
 
                 $result['oneOf'] = [];
 
-                foreach( $schemaObject['oneOf'] as $type ) {
+                foreach( $schemaObject['oneOf'] as $index => $type ) {
                     $result['oneOf'][] = $this->generateSchemaObject( $type,
-                                            array_merge( $context, [ 'currentKey' => null ] ) );
+                                            array_merge( $childContext, [
+                                                'currentKey' => null,
+                                                'name' => $name === null ? null : $name . '.option' . ( $index + 1 ),
+                                                'location' => $location . '/oneOf/' . $index
+                                            ] ) );
                 }
 
             } else {
@@ -287,7 +421,11 @@ class Generator3_1_0 extends GeneratorBase {
 
                     foreach( $schemaObject['properties'] as $key => $parameter) {
                         $result['properties'][$key] = $this->generateSchemaObject( $parameter,
-                                                        array_merge( $context, [ 'currentKey' => $key ] ) );
+                                                        array_merge( $childContext, [
+                                                            'currentKey' => $key,
+                                                            'name' => $name === null ? $key : $name . '.' . $key,
+                                                            'location' => $location . '/' . $key
+                                                        ] ) );
 
                         if ( isset( $schemaObject['properties'][$key]['required'] ) &&
                             $schemaObject['properties'][$key]['required'] === true) {
@@ -302,7 +440,11 @@ class Generator3_1_0 extends GeneratorBase {
 
                 if ( $schemaObject['type'] === 'array' && isset( $schemaObject['items'] ) ) {
                     //TODO Is it safe to always pass context with same currentKey of parent?
-                    $result['items'] = $this->generateSchemaObject( $schemaObject['items'], $context );
+                    $result['items'] = $this->generateSchemaObject( $schemaObject['items'],
+                                            array_merge( $childContext, [
+                                                'name' => $name,
+                                                'location' => $location . '/items'
+                                            ] ) );
                 }
 
             }
@@ -322,25 +464,21 @@ class Generator3_1_0 extends GeneratorBase {
             $result['enum'] = array_values( $schemaObject['enum'] );
         }
 
-        if ( $this->extractCommonTypes &&
-            ( ( isset( $result['type'] ) && $result['type'] === 'object' && $context['currentKey'] ) ||
+        //a route's response is made a component by generateResponseSchema()
+        $isResponse = isset( $context['isResponse'] ) && $context['isResponse'];
+
+        //objects and enums are extracted, and anything given a title
+        if ( $this->extractCommonTypes && !$isResponse && $name !== null && $name !== '' &&
+            ( $title !== null ||
+                ( isset( $result['type'] ) && $result['type'] === 'object' && $currentKey ) ||
                 ( isset( $result['enum'] ) && is_array( $result['enum'] ) ) ) ) {
-            
-            $uriKey = $context['currentKey'];
 
-            //TODO Improve collission handling
-            $i = 1;
-            while ( isset(  $this->components['schemas'][$uriKey] ) &&
-                    $this->components['schemas'][$uriKey] !== $result ) {
-                $uriKey = $context['currentKey'] . '_' . $i++;
-            }
+            $name = $this->getComponentName( $name );
 
-            $uri = '#/components/schemas/' . $uriKey;
-
-            $this->components['schemas'][$uriKey] = $result;
+            $this->addComponent( $name, $result, $location );
 
             return [
-                '$ref' => $uri
+                '$ref' => '#/components/schemas/' . $name
             ];
         }
 

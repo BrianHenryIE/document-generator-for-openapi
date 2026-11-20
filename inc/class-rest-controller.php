@@ -31,6 +31,7 @@ class RestController {
     public function generate_document( $request ) {
         $namespace = '';
         $extract_common_types = false;
+        $strict_component_names = false;
 
         if ( isset( $request['namespace'] ) ) {
             $namespace = $request['namespace'];
@@ -38,6 +39,10 @@ class RestController {
 
         if ( isset( $request['extract_common_types'] ) ) {
             $extract_common_types = $request['extract_common_types'] === true;
+        }
+
+        if ( isset( $request['strict_component_names'] ) ) {
+            $strict_component_names = $request['strict_component_names'] === true;
         }
 
         if ( empty( $namespace ) ) {
@@ -62,8 +67,13 @@ class RestController {
 
         //generate openapi document
         //TODO create factory for switching between version
-        $generator = new Generator3_1_0( $namespace, $data, $extract_common_types );
-        $result = $generator->generateDocument();
+        $generator = new Generator3_1_0( $namespace, $data, $extract_common_types, $strict_component_names );
+
+        try {
+            $result = $generator->generateDocument();
+        } catch ( ComponentNameCollisionException $exception ) {
+            return new \WP_Error( 'component_name_collision', $exception->getMessage(), [ 'status' => 500 ] );
+        }
         
         return rest_ensure_response($result);
     }
@@ -78,6 +88,12 @@ class RestController {
             ],
             'extract_common_types' => [
                 'description' => esc_html__( 'Defines if JSON schema objects should be extracted and, if equal, merged to one single named type.',
+                                                'document-generator-for-openapi' ),
+                'type' => 'boolean',
+                'required' => false
+            ],
+            'strict_component_names' => [
+                'description' => esc_html__( 'With extract_common_types, fail when two different schemas have the same title, rather than naming the second after where it is.',
                                                 'document-generator-for-openapi' ),
                 'type' => 'boolean',
                 'required' => false

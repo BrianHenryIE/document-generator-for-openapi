@@ -19,6 +19,7 @@ if ( ! defined( 'WPINC' ) ) {
 require_once __DIR__ . '/inc/class-integration.php';
 require_once __DIR__ . '/inc/class-rest-controller.php';
 require_once __DIR__ . '/inc/class-generator.php';
+require_once __DIR__ . '/inc/class-component-name-collision-exception.php';
 require_once __DIR__ . '/inc/class-generator-3_1_0.php';
 require_once __DIR__ . '/inc/class-generator-cli.php';
 
