@@ -1,7 +1,7 @@
 {
-    "name": "schneiderundschuetz/document-generator-for-openapi",
-    "type": "project",
-    "license": "",
+    "name": "brianhenryie/document-generator-for-openapi",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
     "description": "OpenAPI (fka. Swagger) Document Generator for WordPress REST API",
     "homepage": "https://www.sus.digital",
     "authors": [],
