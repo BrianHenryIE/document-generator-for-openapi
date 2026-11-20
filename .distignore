@@ -12,3 +12,7 @@ docker-compose.yml
 /vendor
 *.zip
 .DS_Store
+tests
+phpunit.xml.dist
+.phpunit.result.cache
+.github
